@@ -2,7 +2,7 @@
   "name": "orderflow-api",
   "version": "1.0.0",
   "private": true,
-  "description": "A production-minded order management REST API portfolio project",
+  "description": "An order management API with transactional checkout and inventory updates",
   "license": "MIT",
   "type": "module",
   "engines": { "node": ">=22" },
@@ -11,7 +11,8 @@
     "build": "tsc -p tsconfig.build.json",
     "start": "node --env-file-if-exists=.env dist/server.js",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
+    "test": "vitest run --exclude 'tests/integration/**'",
+    "test:integration": "vitest run tests/integration",
     "test:watch": "vitest",
     "db:migrate": "node --env-file-if-exists=.env --import tsx scripts/migrate.ts",
     "check": "npm run typecheck && npm test && npm run build"
