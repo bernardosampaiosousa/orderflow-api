@@ -3,6 +3,7 @@ import type { Pool, PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql
 import { HttpError } from '../lib/errors.js';
 import { priceOrder, type RequestedItem, type AvailableProduct } from './orderPolicy.js';
 
+// Shared transaction wrapper: no half-created order when a query fails.
 async function transaction<T>(db: Pool, action: (conn: PoolConnection) => Promise<T>): Promise<T> {
   const conn = await db.getConnection();
   try {
@@ -18,11 +19,11 @@ async function transaction<T>(db: Pool, action: (conn: PoolConnection) => Promis
   }
 }
 
+// Lock stock before checkout; two requests may race for the last item.
 export async function createOrder(db: Pool, userId: string, items: RequestedItem[]) {
   return transaction(db, async conn => {
     const sortedIds = items.map(item => item.productId).sort();
     const placeholders = sortedIds.map(() => '?').join(', ');
-    // InnoDB row locks keep two concurrent checkouts from selling the same stock.
     const [products] = await conn.query<RowDataPacket[]>(
       `SELECT id, active, price_cents AS priceCents, stock FROM products
        WHERE id IN (${placeholders}) ORDER BY id FOR UPDATE`, sortedIds,
@@ -50,6 +51,7 @@ export async function createOrder(db: Pool, userId: string, items: RequestedItem
   });
 }
 
+// Paginates orders and limits customers to their own history.
 export async function listOrders(db: Pool, userId: string, isAdmin: boolean, page: number, limit: number) {
   const where = isAdmin ? '' : 'WHERE user_id = ?';
   const args = isAdmin ? [] : [userId];
@@ -62,6 +64,7 @@ export async function listOrders(db: Pool, userId: string, isAdmin: boolean, pag
   return { data: rows, meta: { page, limit, total: Number(counts[0]?.total ?? 0) } };
 }
 
+// Loads an order with its saved prices, checking ownership before returning details.
 export async function getOrder(db: Pool, id: string, userId: string, isAdmin: boolean) {
   const [orders] = await db.execute<RowDataPacket[]>(
     `SELECT id, user_id AS userId, status, total_cents AS totalCents, created_at AS createdAt
@@ -76,6 +79,7 @@ export async function getOrder(db: Pool, id: string, userId: string, isAdmin: bo
   return { ...orders[0], items };
 }
 
+// A second cancellation must not add stock again.
 export async function cancelOrder(db: Pool, id: string, userId: string, isAdmin: boolean) {
   return transaction(db, async conn => {
     const [orders] = await conn.execute<RowDataPacket[]>(

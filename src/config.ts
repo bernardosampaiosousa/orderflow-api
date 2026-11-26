@@ -10,6 +10,7 @@ const schema = z.object({
   DB_NAME: z.string().min(1),
   JWT_SECRET: z.string().min(32),
 }).superRefine((value, ctx) => {
+  // Don't let placeholder secrets make it to startup.
   if (value.JWT_SECRET.startsWith('replace-with-')) {
     ctx.addIssue({ code: 'custom', path: ['JWT_SECRET'], message: 'Generate a real random JWT secret' });
   }
@@ -20,6 +21,7 @@ const schema = z.object({
 
 export type AppConfig = z.infer<typeof schema>;
 
+// Validate environment values before creating the app.
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   return schema.parse(env);
 }

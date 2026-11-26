@@ -2,12 +2,14 @@ import type { ErrorRequestHandler } from 'express';
 import { ZodError } from 'zod';
 
 export class HttpError extends Error {
+  // Lets route code send an intentional HTTP status and error code.
   constructor(public readonly status: number, public readonly code: string, message: string) {
     super(message);
     this.name = 'HttpError';
   }
 }
 
+// Keep error JSON predictable and hide unexpected server details.
 export const errorHandler: ErrorRequestHandler = (error: unknown, _req, res, _next) => {
   if (error instanceof SyntaxError && 'status' in error && error.status === 400) {
     res.status(400).json({ error: { code: 'INVALID_JSON', message: 'Malformed JSON request body' } });

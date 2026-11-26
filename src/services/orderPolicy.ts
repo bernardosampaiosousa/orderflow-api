@@ -4,6 +4,7 @@ export type RequestedItem = { productId: string; quantity: number };
 export type AvailableProduct = { id: string; active: number | boolean; priceCents: number; stock: number };
 export type PricedItem = { productId: string; quantity: number; unitPriceCents: number; subtotalCents: number };
 
+// Prices an order from database values so clients can't choose their own totals.
 export function priceOrder(items: RequestedItem[], products: AvailableProduct[]): {
   lines: PricedItem[]; totalCents: number;
 } {

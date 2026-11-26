@@ -7,9 +7,11 @@ import { issueToken } from '../lib/token.js';
 import { HttpError } from '../lib/errors.js';
 import { authenticate, getUser } from '../middleware/auth.js';
 
+// Keeps registration, login, and current-user endpoints in one router.
 export function authRoutes(db: Pool, secret: string): Router {
   const router = Router();
 
+  // New accounts always start as customers; role escalation stays outside registration.
   router.post('/register', async (req, res) => {
     const input = registration.parse(req.body);
     const id = randomUUID();
@@ -22,6 +24,7 @@ export function authRoutes(db: Pool, secret: string): Router {
     res.status(201).json({ data: { id, name: input.name, email: input.email, role: 'CUSTOMER' }, token });
   });
 
+  // Signs a fresh token only after the saved password hash matches.
   router.post('/login', async (req, res) => {
     const input = login.parse(req.body);
     const [rows] = await db.execute<RowDataPacket[]>(
@@ -35,6 +38,7 @@ export function authRoutes(db: Pool, secret: string): Router {
     res.json({ data: { id: user.id, name: user.name, email: user.email, role: user.role }, token });
   });
 
+  // Reads the account already checked by the middleware, not unchecked token data.
   router.get('/me', authenticate(db, secret), (_req, res) => {
     res.json({ data: getUser(res.locals) });
   });

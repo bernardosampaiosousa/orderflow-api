@@ -9,6 +9,7 @@ const server = app.listen(config.PORT, '0.0.0.0', () => {
   console.log(`OrderFlow API listening on port ${config.PORT}`);
 });
 
+// Stops new requests and closes the pool when the process is asked to exit.
 async function shutdown() {
   server.close(async () => {
     await db.end();
