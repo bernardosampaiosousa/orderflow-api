@@ -6,12 +6,14 @@ import { authRoutes } from './routes/auth.js';
 import { productRoutes } from './routes/products.js';
 import { orderRoutes } from './routes/orders.js';
 
+// No listen() here; Supertest can exercise the routes directly.
 export function createApp(db: Pool, jwtSecret: string) {
   const app = express();
   app.disable('x-powered-by');
   app.use(helmet());
   app.use(express.json({ limit: '32kb' }));
 
+  // A running process isn't healthy if MySQL is down.
   app.get('/health', async (_req, res) => {
     await db.query('SELECT 1');
     res.json({ status: 'ok' });

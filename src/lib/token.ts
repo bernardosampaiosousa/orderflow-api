@@ -4,6 +4,7 @@ import { HttpError } from './errors.js';
 export type Identity = { id: string; role: 'CUSTOMER' | 'ADMIN' };
 const encoder = new TextEncoder();
 
+// Registration and login share the same two-hour JWT format.
 export async function issueToken(user: Identity, secret: string): Promise<string> {
   return new SignJWT({ role: user.role })
     .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
@@ -15,6 +16,7 @@ export async function issueToken(user: Identity, secret: string): Promise<string
     .sign(encoder.encode(secret));
 }
 
+// Checks the signature and claims before a protected route trusts the account ID.
 export async function readToken(token: string, secret: string): Promise<Identity> {
   try {
     const { payload } = await jwtVerify(token, encoder.encode(secret), {

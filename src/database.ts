@@ -1,6 +1,7 @@
 import mysql, { type Pool } from 'mysql2/promise';
 import type { AppConfig } from './config.js';
 
+// One connection pool is shared by the whole API.
 export function createDatabase(config: AppConfig): Pool {
   return mysql.createPool({
     host: config.DB_HOST,

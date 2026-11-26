@@ -8,13 +8,16 @@ import { authenticate, requireAdmin } from '../middleware/auth.js';
 const FIELDS = `id, sku, name, description, price_cents AS priceCents,
   stock, active, created_at AS createdAt, updated_at AS updatedAt`;
 
+// Converts MySQL's numeric boolean into the API's true/false value.
 function present(row: RowDataPacket): Record<string, unknown> {
   return { ...row, active: Boolean(row.active) };
 }
 
+// Allows public catalog reads but reserves product changes for admins.
 export function productRoutes(db: Pool, secret: string): Router {
   const router = Router();
 
+  // Lists only active products so hidden items don't show up in the storefront.
   router.get('/', async (req, res) => {
     const { page, limit } = pagination.parse(req.query);
     const offset = (page - 1) * limit;
@@ -26,6 +29,7 @@ export function productRoutes(db: Pool, secret: string): Router {
     res.json({ data: rows.map(present), meta: { page, limit, total: Number(counts[0]?.total ?? 0) } });
   });
 
+  // A deactivated product should also disappear from direct lookups.
   router.get('/:id', async (req, res) => {
     const id = uuid.parse(req.params.id);
     const [rows] = await db.execute<RowDataPacket[]>(`SELECT ${FIELDS} FROM products WHERE id = ? AND active = 1`, [id]);
@@ -33,6 +37,7 @@ export function productRoutes(db: Pool, secret: string): Router {
     res.json({ data: present(rows[0]) });
   });
 
+  // Validates admin input before inserting a product with a server-generated ID.
   router.post('/', authenticate(db, secret), requireAdmin, async (req, res) => {
     const item = newProduct.parse(req.body);
     const id = randomUUID();
@@ -44,6 +49,7 @@ export function productRoutes(db: Pool, secret: string): Router {
     res.status(201).json({ data: present(rows[0]!) });
   });
 
+  // Request keys never become SQL columns unless they're on this allowlist.
   router.patch('/:id', authenticate(db, secret), requireAdmin, async (req, res) => {
     const id = uuid.parse(req.params.id);
     const input = productUpdate.parse(req.body);
@@ -52,7 +58,6 @@ export function productRoutes(db: Pool, secret: string): Router {
       priceCents: 'price_cents', stock: 'stock', active: 'active',
     } as const;
     const pairs = Object.entries(input) as Array<[keyof typeof columns, unknown]>;
-    // Only SQL identifiers from this fixed allowlist are interpolated.
     const assignments = pairs.map(([key]) => `${columns[key]} = ?`).join(', ');
     const values = pairs.map(([key, value]) => key === 'active' ? Number(value) : value) as Array<string | number | null>;
     const [result] = await db.execute<ResultSetHeader>(
