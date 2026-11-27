@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import type { Pool } from 'mysql2/promise';
-import { newOrder, pagination, uuid } from '../lib/schemas.js';
+import { idempotencyKey, newOrder, pagination, uuid } from '../lib/schemas.js';
 import { authenticate, getUser } from '../middleware/auth.js';
 import { cancelOrder, createOrder, getOrder, listOrders } from '../services/orders.js';
 
@@ -12,7 +12,9 @@ export function orderRoutes(db: Pool, secret: string): Router {
   // Creates an order from product IDs and quantities; prices come from MySQL.
   router.post('/', async (req, res) => {
     const { items } = newOrder.parse(req.body);
-    const order = await createOrder(db, getUser(res.locals).id, items);
+    // Clients reuse this key on network retries, not for independent purchases.
+    const key = idempotencyKey.parse(req.header('Idempotency-Key'));
+    const order = await createOrder(db, getUser(res.locals).id, items, key);
     res.status(201).json({ data: order });
   });
   // Customers get their own history, while admins can inspect all orders.

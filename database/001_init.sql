@@ -42,3 +42,15 @@ CREATE TABLE IF NOT EXISTS order_items (
   CONSTRAINT fk_item_product FOREIGN KEY (product_id) REFERENCES products(id),
   CONSTRAINT chk_item_quantity CHECK (quantity BETWEEN 1 AND 100)
 ) ENGINE=InnoDB;
+
+-- Each checkout key belongs to one user and one request payload. The response
+-- is stored in the same transaction as the order so retries can replay it.
+CREATE TABLE IF NOT EXISTS checkout_requests (
+  user_id CHAR(36) NOT NULL,
+  idempotency_key VARCHAR(128) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  request_hash CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  response_json JSON NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (user_id, idempotency_key),
+  CONSTRAINT fk_checkout_request_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
