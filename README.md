@@ -1,5 +1,7 @@
 # OrderFlow API
 
+[![CI](https://github.com/bernardosampaiosousa/orderflow-api/actions/workflows/ci.yml/badge.svg)](https://github.com/bernardosampaiosousa/orderflow-api/actions/workflows/ci.yml)
+
 I built OrderFlow to work through a common checkout problem: what happens when two customers try to buy the last item at the same time?
 
 It's a small REST API for products and orders. The interesting part is the MySQL transaction that checks inventory, saves a snapshot of the product price, and updates stock together. There's no payment processing or frontend.
@@ -97,6 +99,21 @@ The API locks the requested product rows with `SELECT ... FOR UPDATE`. It then c
 Cancellation locks the order, restores stock once, and changes its status to `CANCELLED`. Repeating a cancellation returns a conflict instead of incrementing inventory again.
 
 The code for this lives in [`src/services/orders.ts`](src/services/orders.ts), with the rules for line prices in [`src/services/orderPolicy.ts`](src/services/orderPolicy.ts).
+
+### Checkout flow
+
+```mermaid
+flowchart TD
+    A["POST /api/orders"] --> B["Validate items"]
+    B --> C["Begin MySQL transaction"]
+    C --> D["Lock product rows"]
+    D --> E{"Products active and enough stock?"}
+    E -->|No| F["Roll back and return an error"]
+    E -->|Yes| G["Save order, items and decrement stock"]
+    G --> H["Commit"]
+```
+
+The [MySQL integration test](tests/integration/mysql.test.ts) sends two simultaneous checkouts for the final unit of a product. It verifies that only one succeeds and that stock never becomes negative.
 
 ## Tests
 
