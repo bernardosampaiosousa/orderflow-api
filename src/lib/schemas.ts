@@ -1,6 +1,9 @@
 import { z } from 'zod';
 
 export const uuid = z.uuid();
+export const idempotencyKey = z.string().min(8).max(128).regex(/^[A-Za-z0-9_-]+$/, {
+  message: 'Use 8-128 letters, numbers, hyphens or underscores',
+});
 export const registration = z.strictObject({
   name: z.string().trim().min(2).max(120),
   email: z.email().transform(value => value.toLowerCase()),

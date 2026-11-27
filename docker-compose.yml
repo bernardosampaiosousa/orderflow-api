@@ -18,12 +18,26 @@ services:
       timeout: 5s
       retries: 20
 
+  migrate:
+    build: .
+    command: ["node", "scripts/migrate.mjs"]
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DB_HOST: db
+      DB_PORT: 3306
+      DB_USER: orderflow
+      DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
+      DB_NAME: orderflow
+    restart: "no"
+
   api:
     build: .
     restart: unless-stopped
     depends_on:
-      db:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     environment:
       NODE_ENV: production
       PORT: 3000

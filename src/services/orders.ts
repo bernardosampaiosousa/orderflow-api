@@ -1,7 +1,25 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { Pool, PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { HttpError } from '../lib/errors.js';
-import { priceOrder, type RequestedItem, type AvailableProduct } from './orderPolicy.js';
+import { priceOrder, type RequestedItem, type AvailableProduct, type PricedItem } from './orderPolicy.js';
+
+type CreatedOrder = {
+  id: string;
+  userId: string;
+  status: 'PLACED';
+  totalCents: number;
+  items: PricedItem[];
+};
+
+// Ignore item order when comparing retries, but reject a changed quantity or product.
+function requestHash(items: RequestedItem[]): string {
+  const normalized = [...items].sort((a, b) => a.productId < b.productId ? -1 : a.productId > b.productId ? 1 : 0);
+  return createHash('sha256').update(JSON.stringify(normalized)).digest('hex');
+}
+
+function isDuplicateKey(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && 'code' in error && error.code === 'ER_DUP_ENTRY';
+}
 
 // Shared transaction wrapper: no half-created order when a query fails.
 async function transaction<T>(db: Pool, action: (conn: PoolConnection) => Promise<T>): Promise<T> {
@@ -20,8 +38,34 @@ async function transaction<T>(db: Pool, action: (conn: PoolConnection) => Promis
 }
 
 // Lock stock before checkout; two requests may race for the last item.
-export async function createOrder(db: Pool, userId: string, items: RequestedItem[]) {
+export async function createOrder(db: Pool, userId: string, items: RequestedItem[], idempotencyKey?: string): Promise<CreatedOrder> {
   return transaction(db, async conn => {
+    if (idempotencyKey) {
+      const fingerprint = requestHash(items);
+      try {
+        // Claim the key before locking stock. Concurrent retries wait on this unique row.
+        await conn.execute(
+          'INSERT INTO checkout_requests (user_id, idempotency_key, request_hash) VALUES (?, ?, ?)',
+          [userId, idempotencyKey, fingerprint],
+        );
+      } catch (error) {
+        if (!isDuplicateKey(error)) throw error;
+        const [existing] = await conn.execute<RowDataPacket[]>(
+          `SELECT request_hash AS requestHash, CAST(response_json AS CHAR) AS responseJson
+           FROM checkout_requests WHERE user_id = ? AND idempotency_key = ? FOR UPDATE`,
+          [userId, idempotencyKey],
+        );
+        if (!existing[0]) throw error;
+        if (existing[0].requestHash !== fingerprint) {
+          throw new HttpError(409, 'IDEMPOTENCY_CONFLICT', 'Idempotency key was already used for a different order');
+        }
+        if (typeof existing[0].responseJson !== 'string') {
+          throw new HttpError(409, 'IDEMPOTENCY_INCOMPLETE', 'Previous checkout is not ready to replay');
+        }
+        return JSON.parse(existing[0].responseJson) as CreatedOrder;
+      }
+    }
+
     const sortedIds = items.map(item => item.productId).sort();
     const placeholders = sortedIds.map(() => '?').join(', ');
     const [products] = await conn.query<RowDataPacket[]>(
@@ -47,7 +91,15 @@ export async function createOrder(db: Pool, userId: string, items: RequestedItem
         [id, line.productId, line.quantity, line.unitPriceCents],
       );
     }
-    return { id, userId, status: 'PLACED', totalCents, items: lines };
+    const order: CreatedOrder = { id, userId, status: 'PLACED', totalCents, items: lines };
+    if (idempotencyKey) {
+      const [saved] = await conn.execute<ResultSetHeader>(
+        'UPDATE checkout_requests SET response_json = ? WHERE user_id = ? AND idempotency_key = ?',
+        [JSON.stringify(order), userId, idempotencyKey],
+      );
+      if (saved.affectedRows !== 1) throw new Error('Unable to save checkout replay response');
+    }
+    return order;
   });
 }
 

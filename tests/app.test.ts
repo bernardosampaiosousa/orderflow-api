@@ -48,6 +48,16 @@ describe('HTTP API', () => {
     expect(res.status).toBe(401);
   });
 
+  it('requires an idempotency key for authenticated checkouts', async () => {
+    const token = await issueToken({ id: ID, role: 'CUSTOMER' }, SECRET);
+    const res = await request(createApp(fakeDatabase(), SECRET))
+      .post('/api/orders')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ items: [{ productId: ID, quantity: 1 }] });
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
+  });
+
   it('prevents regular users from managing products', async () => {
     const token = await issueToken({ id: ID, role: 'CUSTOMER' }, SECRET);
     const res = await request(createApp(fakeDatabase(), SECRET))

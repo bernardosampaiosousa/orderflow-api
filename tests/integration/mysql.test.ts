@@ -33,6 +33,7 @@ describe('checkout with MySQL', () => {
   }, 30_000);
 
   beforeEach(async () => {
+    await db.query('DELETE FROM checkout_requests');
     await db.query('DELETE FROM order_items');
     await db.query('DELETE FROM orders');
     await db.query('DELETE FROM products');
@@ -66,6 +67,35 @@ describe('checkout with MySQL', () => {
     const [orders] = await db.query<RowDataPacket[]>('SELECT COUNT(*) AS count FROM orders');
     expect(stock[0]!.stock).toBe(0);
     expect(orders[0]!.count).toBe(1);
+  });
+
+  it('returns one order when the same checkout is retried concurrently', async () => {
+    const items = [{ productId, quantity: 1 }];
+    const [first, replay] = await Promise.all([
+      createOrder(db, userId, items, 'checkout-retry-001'),
+      createOrder(db, userId, items, 'checkout-retry-001'),
+    ]);
+
+    expect(replay).toEqual(first);
+    const [stock] = await db.execute<RowDataPacket[]>('SELECT stock FROM products WHERE id = ?', [productId]);
+    const [orders] = await db.query<RowDataPacket[]>('SELECT COUNT(*) AS count FROM orders');
+    const [requests] = await db.query<RowDataPacket[]>('SELECT COUNT(*) AS count FROM checkout_requests');
+    expect(stock[0]!.stock).toBe(0);
+    expect(orders[0]!.count).toBe(1);
+    expect(requests[0]!.count).toBe(1);
+  });
+
+  it('rejects a reused key for a different payload', async () => {
+    await createOrder(db, userId, [{ productId, quantity: 1 }], 'checkout-retry-002');
+    await expect(createOrder(db, userId, [{ productId, quantity: 2 }], 'checkout-retry-002'))
+      .rejects.toMatchObject({ status: 409, code: 'IDEMPOTENCY_CONFLICT' });
+  });
+
+  it('releases an idempotency key when the checkout is rolled back', async () => {
+    await expect(createOrder(db, userId, [{ productId, quantity: 2 }], 'checkout-retry-003'))
+      .rejects.toMatchObject({ status: 409, code: 'INSUFFICIENT_STOCK' });
+    const order = await createOrder(db, userId, [{ productId, quantity: 1 }], 'checkout-retry-003');
+    expect(order.totalCents).toBe(4999);
   });
 
   it('restores stock on cancellation and never restores it twice', async () => {
